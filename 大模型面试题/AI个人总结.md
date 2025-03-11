@@ -329,6 +329,90 @@ events = graph.stream(None, config, stream_mode="values")
 
 ​     使用 graph.get_state_history() 来获取对话的所有历史状态
 
+#### 6、ChatBot 基础图
+```python
+# 聊天机器人基础图
+​graph_builder = StateGraph(State)
+tool_node = ToolNode(tools=self.tools)
+graph_builder.add_node("history_manager", self.async_history_manager)
+graph_builder.add_node("chatbot", self.chatbot)
+graph_builder.add_node("tools", tool_node)
+
+graph_builder.set_entry_point("history_manager")
+graph_builder.add_edge("history_manager", "chatbot")
+graph_builder.add_conditional_edges(
+    "chatbot",
+    tools_condition,
+)
+graph_builder.add_edge("tools", "chatbot")
+graph = graph_builder.compile(checkpointer=self.checkpoint)
+
+# RAG基础图
+# Define a new graph
+graph_builder = StateGraph(BaseRagState)
+retrieve = ToolNode(tools=self.tools)
+# Define the nodes we will cycle between
+graph_builder.add_node("history_manager", self.async_history_manager)
+graph_builder.add_node("chatbot", self.chatbot)  # agent
+graph_builder.add_node("retrieve", retrieve)  # retrieval
+graph_builder.add_node("init_docs", self.init_docs)
+graph_builder.add_node("rewrite", self.rewrite)  # Re-writing the question
+graph_builder.add_node("generate", self.generate)  # Generating a response after we know the documents are relevant
+
+# Call chatbot node to decide to retrieve or not
+graph_builder.add_edge(START, "history_manager")
+graph_builder.add_edge("history_manager", "chatbot")
+# Decide whether to retrieve
+graph_builder.add_conditional_edges(
+    "chatbot",
+    # Assess agent decision
+    tools_condition,
+    {
+	# Translate the condition outputs to nodes in our graph
+	"tools": "retrieve",
+	END: END,
+    },
+)
+graph_builder.add_edge("retrieve", "init_docs")
+# Edges taken after the `action` node is called.
+graph_builder.add_conditional_edges(
+    "init_docs",
+    # Assess agent decision
+    self.grade_documents,
+)
+graph_builder.add_edge("rewrite", "chatbot")
+graph_builder.add_edge("generate", END)
+
+# 计划执行机器人
+graph_builder = StateGraph(PlanExecute)
+
+graph_builder.add_node("history_manager", self.async_history_manager)
+# Add the plan node
+graph_builder.add_node("planner", self.plan_step)
+# Add the execution step
+graph_builder.add_node("agent", self.execute_step)
+# Add a replan node
+graph_builder.add_node("replan", self.replan_step)
+
+graph_builder.add_edge(START, "history_manager")
+graph_builder.add_edge("history_manager", "planner")
+# From plan we go to agent
+graph_builder.add_edge("planner", "agent")
+# From agent, we replan
+graph_builder.add_edge("agent", "replan")
+graph_builder.add_conditional_edges(
+    "replan",
+    # Next, we pass in the function that will determine which node is called next.
+    self.should_end,
+)
+
+# Finally, we compile it!
+# This compiles it into a LangChain Runnable,
+# meaning you can use it as you would any other runnable
+graph = graph_builder.compile(checkpointer=self.checkpoint)
+
+```
+
 ### 4、LangGraph 多智能体协作
 
 #### 工作流程概述
