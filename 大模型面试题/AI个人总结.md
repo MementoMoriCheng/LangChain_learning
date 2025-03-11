@@ -361,6 +361,52 @@ Reflection 机制被广泛应用于生成任务中，例如文章写作、内容
 4、初始响应器
 5、修订
 6、创建工具节点
+举例：自我反思机器人
+1、初始化：
+  参数： llm: ChatOpenAI,
+	 tools: list[BaseTool],
+	 history_len: int,
+	 checkpoint: BaseCheckpointSaver,
+	 knowledge_base: str = None,
+	 top_k: int = None,
+	 score_threshold: float = None
+#担心用户没有选择任何 tool 而造成 agent 逻辑无效, 为保证效果, 强行追加一个 search_internet 工具, 如开发者不需要可注释此行代码.
+        search_internet = get_tool(name="search_internet")
+        self.tools = add_tools_if_not_exists(tools_provides=self.tools, 		tools_need_append=[search_internet])
+2、工具节点[tool node]
+ToolNode 默认只将结果追加到 messages 队列中, 所以需要手动在 history 中追加 ToolMessage 结果
+
+3、图
+子图：
+function_call_sub_graph_builder = StateGraph(ReflexionState)
+function_call_sub_graph_builder.add_node("function_call", self.function_call)
+        function_call_sub_graph_builder.add_node("tools", tool_node)
+        function_call_sub_graph_builder.add_node("process_func_call_history", self.process_func_call_history)
+        function_call_sub_graph_builder.set_entry_point("function_call")
+        function_call_sub_graph_builder.add_edge("function_call", "tools")
+        function_call_sub_graph_builder.add_edge("tools", "process_func_call_history")
+        function_call_sub_graph_builder.add_edge("process_func_call_history", END)
+        function_call_sub_graph = function_call_sub_graph_builder.compile(checkpointer=self.checkpoint)
+构造图：
+        builder = StateGraph(ReflexionState)
+
+        builder.add_node("history_manager", self.async_history_manager)
+        builder.add_node("draft", self.initial) # 草稿
+        builder.add_node("revise", self.revision) # 修改
+        builder.add_node("function_call", function_call_sub_graph)
+        builder.add_node("function_call_loop", function_call_sub_graph)
+
+        builder.set_entry_point("history_manager")
+        builder.add_edge("history_manager", "function_call")
+        builder.add_edge("function_call", "draft")
+        # draft -> execute_tools
+        builder.add_edge("draft", "function_call_loop")
+        # execute_tools -> revise
+        builder.add_edge("function_call_loop", "revise")
+        # revise -> execute_tools OR end
+        builder.add_conditional_edges("revise", self.event_loop)
+
+        graph = builder.compile(checkpointer=self.checkpoint)
 
 蒙特卡洛树搜索
 
@@ -371,6 +417,8 @@ Reflection 机制被广泛应用于生成任务中，例如文章写作、内容
 
 
 本人Python 基础扎实，有良好的编码习惯，能够使用numpy，matplotlib，pandas进行数据分析、数据挖掘、数据预测等，熟悉 SciPy、Keras、scikit-learn等算法库，能够运用Tensorflow、Keras、Pytorch等开源框架实现RNN、CNN系列神经网络模型搭建，熟悉常用模型如：Transformer、GPT、 Bert，了解计算机视觉相关算法如：Yolo系列，SSD，RCNN系列等，具备基于⽬标数据集微调参数、实现迁移学习的能力，具有英文文档阅读能力
+
+
 
 
 
